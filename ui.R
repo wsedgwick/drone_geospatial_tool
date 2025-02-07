@@ -2,6 +2,8 @@
 
 # Define UI
 ui <- fluidPage(
+  useShinyjs(),
+  
   titlePanel("Drone Image and Orthomosaic Viewer"),
   
   sidebarLayout(
@@ -11,6 +13,8 @@ ui <- fluidPage(
       textOutput("selected_folder"),
       shinyFilesButton("ortho_select", "Select Orthomosaic (GeoTIFF)", "Choose a GeoTIFF file", multiple = FALSE),
       actionButton("process", "Process Images"),
+      div(id = "loading", style = "display:none; color: red; font-weight: bold;",
+          "Processing images... Please wait!"),
       br(), br(),
       DTOutput("image_table"),
       sliderInput("marker_size", "Marker Size:", min = 1, max = 10, value = 3, step = 1),
@@ -23,11 +27,9 @@ ui <- fluidPage(
           radioButtons("map_type", "Select Map Type:",
                        choices = c("Street Map" = "OSM", "Satellite" = "Esri"),
                        selected = "OSM"),
-          checkboxInput("show_path", "Show Drone Path", value = TRUE)  # Checkbox for toggling polylines
+          checkboxInput("show_path", "Show Drone Path", value = FALSE)  # Checkbox for toggling polylines
       )
     ),
-    
-    
     
     mainPanel(
       leafletOutput("map", height = "600px")

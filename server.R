@@ -12,47 +12,82 @@ server <- function(input, output, session) {
   observeEvent(input$process, {
     req(input$folder_select)
     
+    show("loading")  # Show loading message
+    
     folder_path <- parseDirPath(volumes, input$folder_select)
     image_files <- list.files(folder_path, pattern = "\\.jpg$", full.names = TRUE, ignore.case = TRUE)
     
     addResourcePath("images", folder_path)
     
-    # Extract EXIF metadata
-    exif_data <- exifr::read_exif(image_files, tags = c("FileName", "GPSLongitude", "GPSLatitude", "GPSAltitude",
-                                                        "Yaw", "Pitch", "Roll", "ImageWidth", "ImageHeight", "DateTimeOriginal"))
+    # ✅ Use `withProgress()` to make progress visible
+    withProgress(message = "Extracting image metadata...", value = 0, session = session, {
+      
+      n <- length(image_files)
+      
+      # ✅ Use `future_lapply()` for parallel processing, passing session manually
+      exif_data_list <- future_lapply(seq_along(image_files), function(i) {
+        # Extract metadata
+        exifr::read_exif(image_files[i], tags = c("FileName", "GPSLongitude", "GPSLatitude", "GPSAltitude",
+                                                  "Yaw", "Pitch", "Roll", "ImageWidth", "ImageHeight", "DateTimeOriginal"))
+      })
+      
+      # 🔥 Correct way to update progress bar in UI
+      for (i in seq_along(exif_data_list)) {
+        incProgress(1/n, session = session)  # ✅ Pass `session` for UI updates
+        Sys.sleep(0.01)  # ✅ Ensures UI refreshes (prevents skipping)
+      }
+      
+      # ✅ Use `dplyr::bind_rows()` instead of `do.call(rbind, ...)`
+      exif_data <- dplyr::bind_rows(exif_data_list)
+    })
     
-    # Remove images that do not have GPS data
-    exif_data <- exif_data[!is.na(exif_data$GPSLongitude) & !is.na(exif_data$GPSLatitude), ]
+    hide("loading")  # Hide loading message when done
     
-    # Convert DateTimeOriginal to actual date-time format
+    # ✅ Remove invalid images early
+    exif_data <- dplyr::filter(exif_data, !is.na(GPSLongitude), !is.na(GPSLatitude))
+    
+    # ✅ Convert DateTimeOriginal to proper format
     exif_data$DateTimeOriginal <- as.POSIXct(exif_data$DateTimeOriginal, format = "%Y:%m:%d %H:%M:%S", tz = "UTC")
     
-    # Sort by date
+    # ✅ Sort by date
     exif_data <- exif_data[order(exif_data$DateTimeOriginal), ]
     
-    # Convert to spatial points
+    # ✅ Convert to spatial points
     exif_data$SourceFile <- basename(exif_data$SourceFile)  
-    exif_data <- st_as_sf(exif_data, coords = c("GPSLongitude", "GPSLatitude"), crs = 4326)
-    images_data(exif_data)
+    exif_data <- sf::st_as_sf(exif_data, coords = c("GPSLongitude", "GPSLatitude"), crs = 4326)
+    
+    images_data(exif_data)  # Store processed image data
   })
+  
+  
   
   # RENDER Leaflet Map
   output$map <- renderLeaflet({
-    leaflet() %>%
+    leaflet(options = leafletOptions(maxZoom = 22)) %>%
       addProviderTiles(providers$OpenStreetMap) %>%
       setView(lng = 0, lat = 0, zoom = 2)
   })
   
+  first_load <- reactiveVal(TRUE)
   # DISPLAY image data
   observe({
     req(images_data())  
     
     exif_sf <- images_data()  
-    
     coords <- st_coordinates(exif_sf)
     
-    center_lng <- mean(coords[, 1], na.rm = TRUE)
-    center_lat <- mean(coords[, 2], na.rm = TRUE)
+    current_view <- isolate(input$map_bounds)
+    current_zoom <- isolate(input$map_zoom)
+    
+    # center_lng <- mean(coords[, 1], na.rm = TRUE)
+    # center_lat <- mean(coords[, 2], na.rm = TRUE)
+    if (is.null(current_view)) {
+      center_lng <- mean(coords[, 1], na.rm = TRUE)
+      center_lat <- mean(coords[, 2], na.rm = TRUE)
+    } else {
+      center_lng <- (current_view$east + current_view$west) / 2
+      center_lat <- (current_view$north + current_view$south) / 2
+    }
     
     map_proxy <- leafletProxy("map") %>%
       clearMarkers() %>%
@@ -91,7 +126,18 @@ server <- function(input, output, session) {
         color = input$marker_color,
         fillColor = input$marker_color,
         fillOpacity = 1
-      ) %>% setView(lng = center_lng, lat = center_lat, zoom = 14)
+      ) 
+    
+    if (first_load()) {
+      center_lng <- mean(coords[, 1], na.rm = TRUE)
+      center_lat <- mean(coords[, 2], na.rm = TRUE)
+      
+      map_proxy %>% setView(lng = center_lng, lat = center_lat, zoom = 14)
+      
+      first_load(FALSE)  # ✅ Disable `setView()` after first use
+    }
+    
+    # setView(lng = center_lng, lat = center_lat, zoom = 14)
     if (input$show_path) {
       map_proxy %>% addPolylines(lng = coords[,1], lat = coords[,2], color = "blue", weight = 2, opacity = 0.8)
     }
@@ -135,7 +181,8 @@ server <- function(input, output, session) {
     
     datatable(df, 
               selection = "single",  
-              options = list(pageLength = 10))
+              options = list(pageLength = 10),
+              class = "compact")
   })
   
   

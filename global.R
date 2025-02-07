@@ -2,12 +2,15 @@ library(shiny)
 library(shinyFiles)
 library(colourpicker)
 library(leaflet)
+library(shinyjs)
 library(sf)
 library(terra)
 library(exifr)
 library(magick)
 library(DT)
 library(dplyr)
+library(future.apply)
+plan(multisession)
 
 
 # Define file paths
