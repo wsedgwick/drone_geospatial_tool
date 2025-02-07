@@ -7,6 +7,7 @@ ui <- fluidPage(
   sidebarLayout(
     sidebarPanel(
       shinyDirButton("folder_select", "Select Image Folder", "Choose a folder with drone images"),
+      br(), br(),
       textOutput("selected_folder"),
       shinyFilesButton("ortho_select", "Select Orthomosaic (GeoTIFF)", "Choose a GeoTIFF file", multiple = FALSE),
       actionButton("process", "Process Images"),
@@ -16,10 +17,17 @@ ui <- fluidPage(
       selectInput("marker_color", "GPS Point Color:", 
                   choices = c("Red" = "red", "Black" = "black", "Yellow" = "yellow", "White" = "white"),
                   selected = "red"),
-      radioButtons("map_type", "Select Map Type:",
-                   choices = c("Street Map" = "OSM", "Satellite" = "Esri"),
-                   selected = "OSM"),
+      
+      # Wrap "Select Map Type" and "Show Drone Path" checkbox in a div for inline layout
+      div(style = "display: flex; align-items: center; gap: 10px;",
+          radioButtons("map_type", "Select Map Type:",
+                       choices = c("Street Map" = "OSM", "Satellite" = "Esri"),
+                       selected = "OSM"),
+          checkboxInput("show_path", "Show Drone Path", value = TRUE)  # Checkbox for toggling polylines
+      )
     ),
+    
+    
     
     mainPanel(
       leafletOutput("map", height = "600px")
