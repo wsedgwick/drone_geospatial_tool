@@ -1,34 +1,29 @@
-
-
-# Define UI
 ui <- fluidPage(
   useShinyjs(),
   
-  titlePanel("Drone Image and Orthomosaic Viewer"),
+  titlePanel("Multi-Folder Drone Image Viewer"),
   
   sidebarLayout(
     sidebarPanel(
       shinyDirButton("folder_select", "Select Image Folder", "Choose a folder with drone images"),
       br(), br(),
-      textOutput("selected_folder"),
-      shinyFilesButton("ortho_select", "Select Orthomosaic (GeoTIFF)", "Choose a GeoTIFF file", multiple = FALSE),
-      actionButton("process", "Process Images"),
-      div(id = "loading", style = "display:none; color: red; font-weight: bold;",
-          "Processing images... Please wait!"),
+      textOutput("preview_folder_path"),
+      DTOutput("preview_image_table"),
+      actionButton("add_folder", "Add Selected Folder"),
       br(), br(),
-      DTOutput("image_table"),
-      sliderInput("marker_size", "Marker Size:", min = 1, max = 10, value = 3, step = 1),
-      selectInput("marker_color", "GPS Point Color:", 
-                  choices = c("Red" = "red", "Black" = "black", "Yellow" = "yellow", "White" = "white"),
-                  selected = "red"),
+      checkboxInput("show_path", "Show Drone Paths", value = FALSE),
+      br(), br(),
       
-      # Wrap "Select Map Type" and "Show Drone Path" checkbox in a div for inline layout
-      div(style = "display: flex; align-items: center; gap: 10px;",
-          radioButtons("map_type", "Select Map Type:",
-                       choices = c("Street Map" = "OSM", "Satellite" = "Esri"),
-                       selected = "OSM"),
-          checkboxInput("show_path", "Show Drone Path", value = FALSE)  # Checkbox for toggling polylines
-      )
+      # Folder legend
+      h4("Folders and Colors:"),
+      uiOutput("folder_legend"),
+      
+      sliderInput("marker_size", "Marker Size:", min = 1, max = 10, value = 3, step = 1),
+      
+      # Select map type
+      radioButtons("map_type", "Select Map Type:",
+                   choices = c("Street Map" = "OSM", "Satellite" = "Esri"),
+                   selected = "OSM")
     ),
     
     mainPanel(
@@ -36,4 +31,3 @@ ui <- fluidPage(
     )
   )
 )
-
