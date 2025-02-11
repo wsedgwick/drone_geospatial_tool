@@ -1,5 +1,7 @@
 server <- function(input, output, session) {
   
+  valid_colors <- c("red", "white", "black", "blue")
+  
   images_data_list <- reactiveVal(list())  # Store multiple datasets
   selected_folders <- reactiveVal(character())  # Store selected folder paths
   folder_colors <- reactiveVal(list())  # Store colors for each folder
@@ -44,12 +46,17 @@ server <- function(input, output, session) {
     
     folder_path <- parseDirPath(volumes, input$folder_select)
     current_folders <- selected_folders()
+    used_colors <- unname(unlist(folder_colors()))
     
     if (!(folder_path %in% current_folders)) {
       selected_folders(c(current_folders, folder_path))
       
-      # Assign a random color to this folder
-      new_color <- sample(c("red", "blue", "green", "purple", "orange", "cyan"), 1)
+      available_colors <- setdiff(valid_colors, used_colors)
+      if (length(available_colors) == 0) {
+        available_colors <- valid_colors  # Reset if all are used
+      }
+      new_color <- sample(available_colors, 1)
+      
       folder_colors(c(folder_colors(), setNames(list(new_color), folder_path)))
       
       updateSelectInput(session, "selected_folder", choices = selected_folders(), selected = folder_path)
@@ -173,13 +180,33 @@ server <- function(input, output, session) {
     req(selected_folders())
     folder_colors_list <- folder_colors()
     
-    legend_html <- ""
-    for (folder in selected_folders()) {
+    legend_ui <- lapply(selected_folders(), function(folder) {
       color <- folder_colors_list[[folder]]
-      legend_html <- paste0(legend_html, "<span style='color:", color, "; font-weight:bold;'>■</span> ", basename(folder), "<br>")
+      selectInput(
+        inputId = paste0("color_", gsub("[^a-zA-Z0-9]", "_", folder)), 
+        label = basename(folder),
+        choices = valid_colors, 
+        selected = color
+      )
+    })
+    
+    do.call(tagList, legend_ui)
+  })
+  
+  observe({
+    req(selected_folders())
+    folder_colors_list <- folder_colors()
+    
+    for (folder in selected_folders()) {
+      color_input_id <- paste0("color_", gsub("[^a-zA-Z0-9]", "_", folder))
+      new_color <- input[[color_input_id]]
+      
+      if (!is.null(new_color) && new_color %in% valid_colors) {
+        folder_colors_list[[folder]] <- new_color
+      }
     }
     
-    HTML(legend_html)
+    folder_colors(folder_colors_list)
   })
   
   output$map <- renderLeaflet({
