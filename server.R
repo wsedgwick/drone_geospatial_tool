@@ -45,15 +45,27 @@ server <- function(input, output, session) {
       addResourcePath(virtual_path, folder_path)
       
       withProgress(message = "Extracting image metadata...", value = 0, session = session, {
-        n <- length(image_files)
-        exif_data_list <- future_lapply(seq_along(image_files), function(i) {
-          exifr::read_exif(image_files[i], tags = c("FileName", "GPSLongitude", "GPSLatitude", "GPSAltitude", "DateTimeOriginal"))
-        })
-        for (i in seq_along(exif_data_list)) {
-          incProgress(1/n)
+        chunk_size <- 50
+        chunks <- split(image_files, ceiling(seq_along(image_files) / chunk_size))
+        total_chunks <- length(chunks)
+        
+        exif_data_list <- list()
+        
+        for (i in seq_along(chunks)) {
+          chunk <- chunks[[i]]
+          
+          chunk_exif <- future_lapply(chunk, function(img) {
+            exifr::read_exif(img, tags = c("FileName", "GPSLongitude", "GPSLatitude", "GPSAltitude", "DateTimeOriginal"))
+          })
+          
+          exif_data_list <- c(exif_data_list, chunk_exif)
+          
+          incProgress(1 / total_chunks, detail = paste0("Loaded ", i * chunk_size, " / ", length(image_files), " images"))
         }
+        
         exif_data <- dplyr::bind_rows(exif_data_list)
       })
+      
       
       hide("loading")
       
@@ -67,6 +79,8 @@ server <- function(input, output, session) {
       updated_data_list <- images_data_list()
       updated_data_list[[folder_path]] <- exif_data
       images_data_list(updated_data_list)
+      
+      
     }
   })
   
@@ -138,12 +152,44 @@ server <- function(input, output, session) {
           df <- st_drop_geometry(sf_data)
           df$Longitude <- round(coords[, 1], 7)
           df$Latitude <- round(coords[, 2], 7)
-          df <- dplyr::select(df, FileName, DateTimeOriginal, Longitude, Latitude)
-          datatable(df, options = list(pageLength = 5), class = "compact")
+          df <- dplyr::select(df, FileName, DateTimeOriginal, Longitude, Latitude, GPSAltitude)
+          
+          # Clean column names
+          colnames(df) <- c("Filename", "DateTime", "Longitude", "Latitude", "Altitude")
+          
+          # Format DateTime nicely
+          df$DateTime <- format(df$DateTime, "%Y-%m-%d %H:%M:%S")
+          
+          # Format Altitude
+          df$Altitude <- paste0(round(as.numeric(df$Altitude), 1), " m")
+          
+          # datatable(df, options = list(pageLength = 5), class = "compact")
+          datatable(df, options = list(pageLength = 5, scrollX = TRUE), class = "compact nowrap")
+          
         })
       })
     }
   })
+  
+  observe({
+    folders <- selected_folders()
+    colors <- folder_colors()
+    
+    for (folder in folders) {
+      local({
+        f <- folder
+        fid <- gsub("[^a-zA-Z0-9]", "_", f)
+        input_id <- paste0("color_", fid)
+        color_input <- input[[input_id]]
+        
+        if (!is.null(color_input) && color_input != colors[[f]]) {
+          colors[[f]] <- color_input
+          folder_colors(colors)
+        }
+      })
+    }
+  })
+  
   
   # Remove folders
   observeEvent(selected_folders(), {
@@ -170,8 +216,8 @@ server <- function(input, output, session) {
   })
   
   # Add map markers and paths
-  observe({
-    req(selected_folders())
+  observeEvent(images_data_list(), {
+    req(length(images_data_list()) > 0)
     
     all_coords <- NULL
     
@@ -218,6 +264,64 @@ server <- function(input, output, session) {
         )
     }
   })
+    
+    observe({
+      req(selected_folders())
+      req(folder_colors())
+      
+      # Clear previous markers and lines
+      proxy <- leafletProxy("map")
+      for (folder in selected_folders()) {
+        proxy <- proxy %>% clearGroup(folder)
+      }
+      
+      all_coords <- NULL
+      
+      for (folder in selected_folders()) {
+        folder_data <- images_data_list()[[folder]]
+        folder_color <- folder_colors()[[folder]]
+        if (!is.null(folder_data)) {
+          coords <- sf::st_coordinates(folder_data)
+          all_coords <- rbind(all_coords, coords)
+          
+          proxy <- proxy %>% addCircleMarkers(
+            lng = coords[, 1],
+            lat = coords[, 2],
+            popup = paste0(
+              "<b>Image:</b> ", folder_data$FileName, "<br>",
+              "<b>Date:</b> ", folder_data$DateTimeOriginal, "<br>",
+              paste0("<img src='", folder_data$virtual_path, "/", folder_data$SourceFile, "' width='300'>")
+            ),
+            radius = input$marker_size,
+            stroke = FALSE,
+            color = folder_color,
+            fillColor = folder_color,
+            fillOpacity = 1,
+            group = folder
+          )
+          
+          if (isTRUE(input$show_path)) {
+            proxy <- proxy %>% addPolylines(
+              lng = coords[, 1], lat = coords[, 2],
+              color = folder_color,
+              weight = 2,
+              opacity = 0.8,
+              group = folder
+            )
+          }
+        }
+      }
+      
+      if (!is.null(all_coords) && nrow(all_coords) > 0) {
+        proxy %>% fitBounds(
+          lng1 = min(all_coords[,1], na.rm = TRUE),
+          lat1 = min(all_coords[,2], na.rm = TRUE),
+          lng2 = max(all_coords[,1], na.rm = TRUE),
+          lat2 = max(all_coords[,2], na.rm = TRUE)
+        )
+      }
+    })
+  
   
   # Initial map
   output$map <- renderLeaflet({

@@ -6,9 +6,7 @@ ui <- fluidPage(
   sidebarLayout(
     sidebarPanel(
       shinyDirButton("folder_select", "Select Image Folder", "Choose a folder with drone images"),
-      br(), br(),
-      checkboxInput("show_path", "Show Drone Paths", value = FALSE),
-      br(), br(),
+
       
       # Folder legend
       h4("Folders:"),
@@ -16,13 +14,14 @@ ui <- fluidPage(
       br(),
       h4("Folder Metadata:"),
       uiOutput("folder_tables"),
+      checkboxInput("show_path", "Show Drone Paths", value = FALSE),
       
       sliderInput("marker_size", "Marker Size:", min = 1, max = 10, value = 3, step = 1),
       
       # Select map type
       radioButtons("map_type", "Select Map Type:",
                    choices = c("Street Map" = "OSM", "Satellite" = "Esri"),
-                   selected = "OSM")
+                   selected = "Esri")
     ),
     
     mainPanel(
