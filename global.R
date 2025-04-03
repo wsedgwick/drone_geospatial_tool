@@ -20,6 +20,9 @@ volumes <- c(
   "D:" = "D:/"
 )
 
+# Helper: null coalescing operator
+`%||%` <- function(a, b) if (!is.null(a)) a else b
+
 # Detect external drives
 external_drives <- function() {
   os <- .Platform$OS.type

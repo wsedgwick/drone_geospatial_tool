@@ -1,6 +1,3 @@
-# Helper: null coalescing operator
-`%||%` <- function(a, b) if (!is.null(a)) a else b
-
 server <- function(input, output, session) {
   # Directory chooser for folder selection
   shinyDirChoose(input, "folder_select", roots = volumes, session = session)
@@ -16,7 +13,6 @@ server <- function(input, output, session) {
   # STEP 1: Add folder to list when selected
   observeEvent(input$folder_select, {
     folder_path <- tryCatch(parseDirPath(volumes, input$folder_select), error = function(e) NULL)
-    message("Selected folder path: ", folder_path)
     if (is.null(folder_path) || length(folder_path) == 0 || is.na(folder_path) || folder_path == "") return()
     
     if (isTRUE(!(folder_path %in% selected_folders()))) {
