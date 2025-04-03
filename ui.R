@@ -7,16 +7,15 @@ ui <- fluidPage(
     sidebarPanel(
       shinyDirButton("folder_select", "Select Image Folder", "Choose a folder with drone images"),
       br(), br(),
-      textOutput("preview_folder_path"),
-      DTOutput("preview_image_table"),
-      actionButton("add_folder", "Add Selected Folder"),
-      br(), br(),
       checkboxInput("show_path", "Show Drone Paths", value = FALSE),
       br(), br(),
       
       # Folder legend
-      h4("Folders and Colors:"),
-      uiOutput("folder_legend"),
+      h4("Folders:"),
+      uiOutput("folder_controls"),
+      br(),
+      h4("Folder Metadata:"),
+      uiOutput("folder_tables"),
       
       sliderInput("marker_size", "Marker Size:", min = 1, max = 10, value = 3, step = 1),
       
@@ -27,7 +26,7 @@ ui <- fluidPage(
     ),
     
     mainPanel(
-      leafletOutput("map", height = "600px")
+      leafletOutput("map", height = "600px"),
     )
   )
 )

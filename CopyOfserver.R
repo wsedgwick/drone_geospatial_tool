@@ -1,8 +1,4 @@
-`%||%` <- function(a, b) if (!is.null(a)) a else b
-
 server <- function(input, output, session) {
-  
-  shinyDirChoose(input, "folder_select", roots = volumes, session = session)
   
   valid_colors <- c("red", "white", "black", "blue")
   
@@ -10,105 +6,93 @@ server <- function(input, output, session) {
   selected_folders <- reactiveVal(character())
   folder_colors <- reactiveVal(list())
   
-  # STEP 1: Add folder to list (no loading yet)
-  observeEvent(input$folder_select, {
-    folder_path <- tryCatch(parseDirPath(volumes, input$folder_select), error = function(e) NULL)
-    if (is.null(folder_path) || length(folder_path) == 0 || folder_path == "") return()
+  `%||%` <- function(a, b) if (!is.null(a)) a else b
+  
+  observe({
+    shinyDirChoose(input, "folder_select", roots = volumes, session = session)
+  })
+  
+  selected_folder_path <- reactiveVal(NULL)
+  preview_images <- reactiveVal(NULL)
+  
+  observe({
+    req(input$folder_select)
+    folder_path <- parseDirPath(volumes, input$folder_select)
+    selected_folder_path(folder_path)
     
-    if (!(folder_path %in% selected_folders())) {
-      current_folders <- selected_folders()
-      used_colors <- unname(unlist(folder_colors()))
-      
+    image_files <- list.files(folder_path, pattern = "\\.jpg$", full.names = FALSE, ignore.case = TRUE)
+    preview_images(data.frame("Image Name" = image_files))
+  })
+  
+  observeEvent(input$add_folder, {
+    req(input$folder_select)
+    folder_path <- parseDirPath(volumes, input$folder_select)
+    current_folders <- selected_folders()
+    used_colors <- unname(unlist(folder_colors()))
+    
+    if (!(folder_path %in% current_folders)) {
       selected_folders(c(current_folders, folder_path))
       
       available_colors <- setdiff(valid_colors, used_colors)
-      if (length(available_colors) == 0) {
-        available_colors <- valid_colors
-      }
+      if (length(available_colors) == 0) available_colors <- valid_colors
       new_color <- sample(available_colors, 1)
+      
       folder_colors(c(folder_colors(), setNames(list(new_color), folder_path)))
     }
-  })
-  
-  # STEP 2: Load metadata for new folders
-  observeEvent(selected_folders(), {
-    isolate({
-      new_folders <- setdiff(selected_folders(), names(images_data_list()))
+    
+    show("loading")
+    image_files <- list.files(folder_path, pattern = "\\.jpg$", full.names = TRUE, ignore.case = TRUE)
+    addResourcePath("images", folder_path)
+    
+    withProgress(message = "Extracting image metadata...", value = 0, session = session, {
+      n <- length(image_files)
+      exif_data_list <- future_lapply(seq_along(image_files), function(i) {
+        exifr::read_exif(image_files[i], tags = c("FileName", "GPSLongitude", "GPSLatitude", "GPSAltitude", "DateTimeOriginal"))
+      })
+      for (i in seq_along(exif_data_list)) {
+        incProgress(1/n)
+        Sys.sleep(0.01)
+      }
+      exif_data <- dplyr::bind_rows(exif_data_list)
     })
     
-    for (folder_path in new_folders) {
-      show("loading")
-      image_files <- list.files(folder_path, pattern = "\\.jpg$", full.names = TRUE, ignore.case = TRUE)
-      
-      # Register a unique resource path per folder
-      virtual_path <- paste0("images_", digest::digest(folder_path))
-      addResourcePath(virtual_path, folder_path)
-      
-      withProgress(message = "Extracting image metadata...", value = 0, session = session, {
-        n <- length(image_files)
-        exif_data_list <- future_lapply(seq_along(image_files), function(i) {
-          exifr::read_exif(image_files[i], tags = c("FileName", "GPSLongitude", "GPSLatitude", "GPSAltitude", "DateTimeOriginal"))
-        })
-        for (i in seq_along(exif_data_list)) {
-          incProgress(1/n)
-        }
-        exif_data <- dplyr::bind_rows(exif_data_list)
-      })
-      
-      hide("loading")
-      
-      exif_data <- dplyr::filter(exif_data, !is.na(GPSLongitude), !is.na(GPSLatitude))
-      exif_data$DateTimeOriginal <- as.POSIXct(exif_data$DateTimeOriginal, format = "%Y:%m:%d %H:%M:%S", tz = "UTC")
-      exif_data <- exif_data[order(exif_data$DateTimeOriginal), ]
-      exif_data$SourceFile <- basename(exif_data$SourceFile)
-      exif_data$virtual_path <- virtual_path
-      exif_data <- sf::st_as_sf(exif_data, coords = c("GPSLongitude", "GPSLatitude"), crs = 4326)
-      
-      updated_data_list <- images_data_list()
-      updated_data_list[[folder_path]] <- exif_data
-      images_data_list(updated_data_list)
-    }
+    hide("loading")
+    
+    exif_data <- dplyr::filter(exif_data, !is.na(GPSLongitude), !is.na(GPSLatitude))
+    exif_data$DateTimeOriginal <- as.POSIXct(exif_data$DateTimeOriginal, format = "%Y:%m:%d %H:%M:%S", tz = "UTC")
+    exif_data <- exif_data[order(exif_data$DateTimeOriginal), ]
+    exif_data$SourceFile <- basename(exif_data$SourceFile)
+    exif_data <- sf::st_as_sf(exif_data, coords = c("GPSLongitude", "GPSLatitude"), crs = 4326)
+    
+    updated_data_list <- images_data_list()
+    updated_data_list[[folder_path]] <- exif_data
+    images_data_list(updated_data_list)
   })
   
-  # Compute checked folders
-  checked_folders <- reactive({
-    folders <- selected_folders()
-    checks <- sapply(folders, function(f) {
-      val <- input[[paste0("chk_", gsub("[^a-zA-Z0-9]", "_", f))]]
-      if (is.null(val)) NA else val
-    })
-    checks <- as.logical(checks)
-    folders[is.na(checks) | checks]
-  })
-  
-  # Folder controls: checkbox + color picker + delete button
-  output$folder_controls <- renderUI({
+  # Render dynamic checkboxes + ✖ remove buttons
+  output$folder_checkboxes <- renderUI({
     req(selected_folders())
     folders <- selected_folders()
     checked <- checked_folders()
-    colors <- folder_colors()
     
-    controls <- lapply(folders, function(folder) {
+    lapply(folders, function(folder) {
       fid <- gsub("[^a-zA-Z0-9]", "_", folder)
-      
       fluidRow(
         column(1, checkboxInput(paste0("chk_", fid), NULL, value = folder %in% checked)),
-        column(6, tags$label(basename(folder))),
-        column(3, selectInput(
-          inputId = paste0("color_", fid),
-          label = NULL,
-          choices = valid_colors,
-          selected = colors[[folder]],
-          width = "100%"
-        )),
+        column(9, tags$label(basename(folder))),
         column(2, actionButton(paste0("rm_", fid), "✖", class = "btn-xs btn-danger"))
       )
-    })
-    
-    tagList(controls)
+    }) %>% tagList()
   })
   
-  # Metadata tables for checked folders
+  # Compute checked folders based on inputs
+  checked_folders <- reactive({
+    req(selected_folders())
+    folders <- selected_folders()
+    Filter(function(f) input[[paste0("chk_", gsub("[^a-zA-Z0-9]", "_", f))]] %||% FALSE, folders)
+  })
+  
+  # Display tables for checked folders
   output$folder_tables <- renderUI({
     req(checked_folders())
     data_list <- images_data_list()
@@ -139,16 +123,15 @@ server <- function(input, output, session) {
           df$Longitude <- round(coords[, 1], 7)
           df$Latitude <- round(coords[, 2], 7)
           df <- dplyr::select(df, FileName, DateTimeOriginal, Longitude, Latitude)
-          datatable(df, options = list(pageLength = 5), class = "compact")
+          datatable(df, options = list(pageLength = 10), class = "compact")
         })
       })
     }
   })
   
-  # Remove folders
-  observeEvent(selected_folders(), {
-    folders <- selected_folders()
-    for (folder in folders) {
+  # Remove folders when ✖ is clicked
+  observe({
+    for (folder in selected_folders()) {
       local({
         f <- folder
         fid <- paste0("rm_", gsub("[^a-zA-Z0-9]", "_", f))
@@ -157,19 +140,19 @@ server <- function(input, output, session) {
           colors <- folder_colors(); colors[[f]] <- NULL; folder_colors(colors)
           dat <- images_data_list(); dat[[f]] <- NULL; images_data_list(dat)
           leafletProxy("map") %>% clearGroup(f)
-        }, ignoreInit = TRUE, once = TRUE)
+        }, ignoreInit = TRUE)
       })
     }
   })
   
-  # Update basemap
+  # Update base map
   observeEvent(input$map_type, {
     leafletProxy("map") %>%
       clearTiles() %>%
       addProviderTiles(if (input$map_type == "Esri") providers$Esri.WorldImagery else providers$OpenStreetMap)
   })
   
-  # Add map markers and paths
+  # Add markers and lines
   observe({
     req(selected_folders())
     
@@ -189,7 +172,7 @@ server <- function(input, output, session) {
             popup = paste0(
               "<b>Image:</b> ", folder_data$FileName, "<br>",
               "<b>Date:</b> ", folder_data$DateTimeOriginal, "<br>",
-              paste0("<img src='", folder_data$virtual_path, "/", folder_data$SourceFile, "' width='300'>")
+              paste0("<img src='images/", folder_data$SourceFile, "' width='300'>")
             ),
             radius = input$marker_size,
             stroke = FALSE,
@@ -219,7 +202,34 @@ server <- function(input, output, session) {
     }
   })
   
-  # Initial map
+  # Folder color legend
+  output$folder_legend <- renderUI({
+    req(selected_folders())
+    folder_colors_list <- folder_colors()
+    lapply(selected_folders(), function(folder) {
+      color <- folder_colors_list[[folder]]
+      selectInput(
+        inputId = paste0("color_", gsub("[^a-zA-Z0-9]", "_", folder)),
+        label = basename(folder),
+        choices = valid_colors,
+        selected = color
+      )
+    }) %>% tagList()
+  })
+  
+  observe({
+    req(selected_folders())
+    colors <- folder_colors()
+    for (folder in selected_folders()) {
+      input_id <- paste0("color_", gsub("[^a-zA-Z0-9]", "_", folder))
+      new_color <- input[[input_id]]
+      if (!is.null(new_color) && new_color %in% valid_colors) {
+        colors[[folder]] <- new_color
+      }
+    }
+    folder_colors(colors)
+  })
+  
   output$map <- renderLeaflet({
     leaflet(options = leafletOptions(maxZoom = 22)) %>%
       addProviderTiles(providers$OpenStreetMap) %>%
