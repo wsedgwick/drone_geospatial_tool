@@ -137,7 +137,7 @@ server <- function(input, output, session) {
           df$Longitude <- round(coords[, 1], 7)
           df$Latitude <- round(coords[, 2], 7)
           df <- dplyr::select(df, FileName, DateTimeOriginal, Longitude, Latitude, GPSAltitude)
-          colnames(df) <- c("Filename", "DateTime", "Longitude", "Latitude", "Altitude")
+          colnames(df) <- c("Filename", "DateTime", "Longitude", "Latitude", "Altitude (AMSL)")
           df$DateTime <- format(df$DateTime, "%Y-%m-%d %H:%M:%S")
           df$Altitude <- paste0(round(as.numeric(df$Altitude), 1), " m")
           datatable(df, options = list(pageLength = 5, scrollX = TRUE), class = "compact nowrap")
