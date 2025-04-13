@@ -15,7 +15,8 @@ ui <- fluidPage(
       h4("Folder Metadata:"),
       uiOutput("folder_tables"),
       checkboxInput("show_path", "Show Drone Paths", value = FALSE),
-      
+      actionButton("copy_to_subfolder", "Copy Selected Images to Subfolder"),
+      DTOutput("seelected_images_table"),
       sliderInput("marker_size", "Marker Size:", min = 1, max = 10, value = 3, step = 1),
       
       # Select map type

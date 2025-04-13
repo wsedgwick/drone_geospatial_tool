@@ -9,6 +9,7 @@ server <- function(input, output, session) {
   images_data_list <- reactiveVal(list())
   selected_folders <- reactiveVal(character())
   folder_colors <- reactiveVal(list())
+  drawn_polygon <- reactiveVal(NULL)
   
   # STEP 1: Add folder to list when selected
   observeEvent(input$folder_select, {
@@ -246,6 +247,72 @@ server <- function(input, output, session) {
   output$map <- renderLeaflet({
     leaflet(options = leafletOptions(maxZoom = 22)) %>%
       addProviderTiles(providers$OpenStreetMap) %>%
-      setView(lng = 0, lat = 0, zoom = 2)
+      setView(lng = 0, lat = 0, zoom = 2) %>%
+      leaflet.extras::addDrawToolbar(
+        targetGroup = "drawn",
+        polylineOptions = FALSE,
+        markerOptions = FALSE,
+        circleOptions = FALSE,
+        rectangleOptions = TRUE,
+        polygonOptions = TRUE,
+        editOptions = leaflet.extras::editToolbarOptions()
+      )
   })
+  
+  # 3. Polygon capture - this goes anywhere in your server after output$map
+  observeEvent(input$map_draw_new_feature, {
+    feature <- input$map_draw_new_feature
+    if (feature$geometry$type == "Polygon") {
+      coords <- feature$geometry$coordinates[[1]]
+      lng <- sapply(coords, function(x) x[[1]])
+      lat <- sapply(coords, function(x) x[[2]])
+      polygon_sf <- st_sf(geometry = st_sfc(st_polygon(list(cbind(lng, lat)))), crs = 4326)
+      drawn_polygon(polygon_sf)
+      showNotification("Polygon drawn!", type = "message")
+    }
+  })
+  
+  observeEvent(input$copy_to_subfolder, {
+    req(drawn_polygon())
+    polygon <- drawn_polygon()
+    all_data <- images_data_list()
+    
+    if (length(all_data) == 0) {
+      showNotification("No image metadata available.", type = "error")
+      return()
+    }
+    
+    for (folder in names(all_data)) {
+      img_data <- all_data[[folder]]
+      selected <- img_data[st_within(img_data, polygon, sparse = FALSE), ]
+      
+      if (nrow(selected) == 0) {
+        next  # skip folders with no matches
+      }
+      
+      # Subfolder inside original folder
+      subfolder <- file.path(folder, "images_inside_polygon")
+      dir.create(subfolder, showWarnings = FALSE)
+      
+      df <- st_drop_geometry(selected)
+      for (i in seq_len(nrow(df))) {
+        src_path <- file.path(folder, df$SourceFile[i])
+        dst_path <- file.path(subfolder, df$SourceFile[i])
+        file.copy(src_path, dst_path, overwrite = TRUE)
+      }
+      
+      showNotification(paste0("Copied ", nrow(df), " images to ", subfolder), type = "message", duration = 8)
+    }
+  })
+  
+  output$selected_images_table <- renderDT({
+    req(drawn_polygon())
+    df_all <- do.call(rbind, images_data_list())
+    df_sel <- df_all[st_within(df_all, drawn_polygon(), sparse = FALSE), ]
+    df_sel <- st_drop_geometry(df_sel)
+    df_sel <- df_sel[, c("FileName", "DateTimeOriginal", "GPSAltitude")]
+    datatable(df_sel, options = list(pageLength = 5))
+  })
+  
+  
 }
